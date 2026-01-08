@@ -1,0 +1,7 @@
+{
+  "name": "MindBreak - 认知与呼吸轻应用",
+  "description": "一个专为碎片化休息时间设计的认知训练与呼吸调节应用，包含注意力、记忆、反应力测试及多种科学呼吸法。",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
