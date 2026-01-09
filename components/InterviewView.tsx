@@ -1,13 +1,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
+import { GoogleGenAI } from "@google/genai";
 
 interface Message {
-  role: 'user' | 'assistant' | 'system';
+  role: 'user' | 'model';
   content: string;
 }
-
-const API_KEY = 'sk-1a664ca4d1fe425f9d510b7fe6c28306';
-const API_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
 
 const InterviewView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [phase, setPhase] = useState<'setup' | 'chat' | 'evaluating' | 'result'>('setup');
@@ -15,7 +13,7 @@ const InterviewView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [stage, setStage] = useState('初面');
   const [messages, setMessages] = useState<Message[]>([]);
   const [userInput, setUserInput] = useState('');
-  const [timeLeft, setTimeLeft] = useState(300); // 5 minutes
+  const [timeLeft, setTimeLeft] = useState(300); 
   const [isTyping, setIsTyping] = useState(false);
   const [evaluation, setEvaluation] = useState('');
   const timerRef = useRef<number | null>(null);
@@ -42,63 +40,82 @@ const InterviewView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     };
   }, [phase]);
 
-  const callAI = async (currentMessages: Message[]) => {
+  const getSystemInstruction = (isEval = false) => {
+    if (isEval) {
+      return `你是一名资深的职业教练。请根据刚才的模拟面试对话，对候选人进行深度复盘。
+      要求：
+      1. 给出 0-100 的综合评分。
+      2. 总结 3 个表现亮点。
+      3. 提出 2 个具体的改进建议（如逻辑性、专业词汇使用、自信度）。
+      4. 保持客观、专业。格式采用 Markdown，但不要使用过大的标题。`;
+    }
+
+    return `你是一名资深的 HR 面试官。你正在面试应聘【${role}】岗位的候选人，当前是【${stage}】阶段。
+    
+    面试行为准则（极重要）：
+    1. **言简意赅**：你的话必须非常精炼，每次回复严禁超过 60 字。
+    2. **人设固定**：专业、冷静、略带权威感。不要过分客气，也不要解释你为什么这么问。
+    3. **引导追问**：不要直接告诉用户该说什么。如果用户回答模糊，请通过“你能举个具体的例子吗？”或“在这个过程中你遇到了什么困难？”这种方式引导其深入回答（引导其使用 STAR 原则）。
+    4. **单点突破**：每次只提一个问题，确保对话逻辑连贯。
+    5. **即时反馈**：可以用一句话对用户的上一个回答做极简评价（如“这个思路很清晰”、“这个案例稍显单薄”），然后立即进入下一个问题。`;
+  };
+
+  const callGemini = async (history: Message[], isEval = false) => {
     try {
       setIsTyping(true);
-      const response = await fetch(API_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${API_KEY}`
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const model = 'gemini-3-flash-preview';
+      
+      const contents = history.map(msg => ({
+        role: msg.role,
+        parts: [{ text: msg.content }]
+      }));
+
+      const response = await ai.models.generateContent({
+        model: model,
+        contents: contents,
+        config: {
+          systemInstruction: getSystemInstruction(isEval),
+          temperature: isEval ? 0.7 : 0.9,
+          topP: 0.95,
         },
-        body: JSON.stringify({
-          model: 'qwen-flash',
-          messages: currentMessages,
-        })
       });
-      const data = await response.json();
+
       setIsTyping(false);
-      return data.choices[0].message.content;
+      return response.text || '面试官陷入了沉思，请稍后。';
     } catch (error) {
-      console.error('AI Error:', error);
+      console.error('Gemini Error:', error);
       setIsTyping(false);
-      return '抱歉，系统目前繁忙，请稍后再试。';
+      return '由于信号不稳定，面试官请求您稍后再试。';
     }
   };
 
   const handleStart = async () => {
     if (!role.trim()) return;
     setPhase('chat');
-    const systemPrompt: Message = {
-      role: 'system',
-      content: `你是一名资深的HR和面试官。现在你正在对一名应聘【${role}】岗位的候选人进行【${stage}】面试。
-      面试规则：
-      1. 这是一个模拟面试，限时5分钟。
-      2. 每次只提一个问题，保持专业且有深度的追问。
-      3. 语气要符合面试官身份，可以略带压力。
-      4. 当面试时间结束或用户要求总结时，你需要给出一个0-100的打分，并总结优缺点。`
-    };
-    const firstQuestionPrompt = "你好，面试现在开始。请先做一个简单的自我介绍，并谈谈你为什么申请这个职位。";
-    setMessages([systemPrompt, { role: 'assistant', content: firstQuestionPrompt }]);
+    
+    const firstQuestion = "你好。请先做一个简短的自我介绍，并重点说明你为何认为自己胜任【" + role + "】这个岗位。";
+    setMessages([{ role: 'model', content: firstQuestion }]);
   };
 
   const handleSendMessage = async () => {
     if (!userInput.trim() || isTyping) return;
+    
     const newMessages: Message[] = [...messages, { role: 'user', content: userInput }];
     setMessages(newMessages);
     setUserInput('');
-    const aiResponse = await callAI(newMessages);
-    setMessages(prev => [...prev, { role: 'assistant', content: aiResponse }]);
+    
+    const aiResponse = await callGemini(newMessages);
+    setMessages(prev => [...prev, { role: 'model', content: aiResponse }]);
   };
 
   const handleEndInterview = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
     setPhase('evaluating');
-    const finalMessages: Message[] = [
-      ...messages,
-      { role: 'system', content: "面试时间已到或用户手动结束。请根据之前的对话，给用户一个面试表现打分（0-100），并详细总结其优点和待改进的地方。请以清晰的Markdown格式输出。" }
-    ];
-    const aiEval = await callAI(finalMessages);
+    
+    // 增加一条提示指令引导生成总结
+    const finalHistory: Message[] = [...messages, { role: 'user', content: "面试结束，请给我整体评价。" }];
+    const aiEval = await callGemini(finalHistory, true);
     setEvaluation(aiEval);
     setPhase('result');
   };
@@ -110,49 +127,49 @@ const InterviewView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   };
 
   return (
-    <div className="h-full flex flex-col animate-in fade-in duration-500">
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} className="w-10 h-10 rounded-full glass flex items-center justify-center text-xl">←</button>
+    <div className="h-full flex flex-col animate-in fade-in duration-500 overflow-hidden">
+      <div className="flex items-center justify-between mb-6 pr-2 shrink-0">
+        <div className="flex items-center gap-5 pl-2">
+          <button onClick={onBack} className="w-12 h-12 rounded-2xl glass flex items-center justify-center text-xl text-slate-500 font-black hover:text-rose-600 transition-colors">←</button>
           <div>
-            <h2 className="text-xl font-bold text-white leading-tight">面试模拟</h2>
-            <span className="text-[10px] font-bold text-rose-500 uppercase tracking-widest bg-rose-500/10 px-2 py-0.5 rounded-md">Alpha 测试版</span>
+            <h2 className="text-2xl font-black text-quality leading-tight">面试模拟</h2>
+            <p className="text-[10px] font-black text-rose-500 uppercase tracking-widest bg-rose-500/10 px-2 py-0.5 rounded-md inline-block">Pro Session</p>
           </div>
         </div>
         {phase === 'chat' && (
-          <div className="px-4 py-2 glass rounded-2xl border-rose-500/20 text-rose-400 font-mono text-sm font-bold flex items-center gap-2">
+          <div className="px-5 py-3 glass rounded-2xl border-rose-500/30 text-rose-500 font-mono text-sm font-black flex items-center gap-2 shadow-lg">
             <span className="animate-pulse">●</span> {formatTime(timeLeft)}
           </div>
         )}
       </div>
 
       {phase === 'setup' && (
-        <div className="flex-1 flex flex-col justify-center space-y-8 px-2">
-          <div className="text-center space-y-2">
-            <div className="w-20 h-20 bg-rose-500/10 rounded-3xl flex items-center justify-center text-4xl mx-auto shadow-inner">🎤</div>
-            <h3 className="text-2xl font-black text-white">设置你的面试场</h3>
-            <p className="text-slate-500 text-xs">AI 将根据你的设定生成专属面试官</p>
+        <div className="flex-1 overflow-y-auto space-y-10 px-2 scrollbar-hide pb-20">
+          <div className="text-center space-y-4 pt-4">
+            <div className="w-24 h-24 bg-rose-500/10 rounded-[2.5rem] flex items-center justify-center text-5xl mx-auto shadow-inner">🎤</div>
+            <h3 className="text-3xl font-black text-quality">设定职场战场</h3>
+            <p className="text-slate-500 text-xs font-black uppercase tracking-widest">Gemini 3 驱动的专业面试训练</p>
           </div>
 
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2">应聘岗位</label>
+          <div className="space-y-6">
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">应聘目标岗位</label>
               <input
                 type="text"
-                placeholder="例如：产品经理、前端开发..."
+                placeholder="例如：产品经理、前端开发、市场专员..."
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
-                className="w-full bg-white/5 border border-white/10 rounded-2xl p-4 text-white focus:outline-none focus:border-rose-500 transition-colors"
+                className="w-full bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-[2rem] p-5 text-quality font-black focus:outline-none focus:border-rose-500 transition-all shadow-inner"
               />
             </div>
-            <div className="space-y-2">
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.2em] ml-2">面试阶段</label>
-              <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-3">
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-[0.3em] ml-2">面试演练阶段</label>
+              <div className="grid grid-cols-3 gap-3">
                 {['初面', '技术面', '终面'].map((s) => (
                   <button
                     key={s}
                     onClick={() => setStage(s)}
-                    className={`py-3 rounded-xl text-xs font-bold transition-all ${stage === s ? 'bg-rose-500 text-white' : 'glass text-slate-400'}`}
+                    className={`py-4 rounded-2xl text-xs font-black transition-all ${stage === s ? 'bg-rose-600 text-white shadow-lg scale-105' : 'glass text-slate-500 border-black/5 dark:border-white/5'}`}
                   >
                     {s}
                   </button>
@@ -161,112 +178,122 @@ const InterviewView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             </div>
           </div>
 
-          <div className="glass p-4 rounded-2xl border-amber-500/20 bg-amber-500/5">
-             <p className="text-[10px] text-amber-200/60 leading-relaxed italic">
-               注意：每次对话限时5分钟。结束后系统将自动评分并给出改进建议。
+          <div className="glass p-5 rounded-[2.5rem] border-rose-500/10 bg-rose-500/5">
+             <p className="text-[11px] text-slate-500 leading-relaxed italic font-black text-center">
+               面试官会针对你的回答进行追问。请尝试使用 <span className="text-rose-600">STAR 法则</span> (情境、任务、行动、结果) 来组织你的语言。
              </p>
           </div>
 
           <button
             onClick={handleStart}
             disabled={!role.trim()}
-            className="w-full py-4 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-black rounded-[2rem] shadow-xl shadow-rose-900/20 transition-all active:scale-95"
+            className="w-full py-6 bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-black text-xl rounded-[2.5rem] shadow-2xl shadow-rose-900/30 transition-all active:scale-95"
           >
-            开启挑战
+            开启专业对话
           </button>
         </div>
       )}
 
       {phase === 'chat' && (
         <div className="flex-1 flex flex-col h-full overflow-hidden">
-          <div className="flex-1 overflow-y-auto space-y-4 pr-2 scrollbar-hide">
-            {messages.filter(m => m.role !== 'system').map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 duration-300`}>
-                <div className={`max-w-[85%] p-4 rounded-3xl ${
+          <div className="flex-1 overflow-y-auto space-y-6 pr-2 scrollbar-hide">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-3 duration-300`}>
+                <div className={`max-w-[85%] p-5 rounded-[2.2rem] ${
                   msg.role === 'user' 
-                  ? 'bg-rose-600 text-white rounded-tr-none' 
-                  : 'glass text-slate-200 rounded-tl-none border-white/10'
-                } text-sm leading-relaxed shadow-sm`}>
+                  ? 'bg-rose-600 text-white rounded-tr-none shadow-xl' 
+                  : 'glass text-quality rounded-tl-none border-black/5 dark:border-white/10 shadow-md'
+                } text-sm leading-relaxed font-black`}>
                   {msg.content}
                 </div>
               </div>
             ))}
             {isTyping && (
               <div className="flex justify-start">
-                <div className="glass p-4 rounded-3xl rounded-tl-none flex gap-1">
-                  <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-bounce"></div>
-                  <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
-                  <div className="w-1.5 h-1.5 bg-rose-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
+                <div className="glass p-5 rounded-[1.8rem] rounded-tl-none flex gap-1.5 shadow-sm border-black/5 dark:border-white/5">
+                  <div className="w-2 h-2 bg-rose-500 rounded-full animate-bounce"></div>
+                  <div className="w-2 h-2 bg-rose-500 rounded-full animate-bounce" style={{animationDelay: '0.2s'}}></div>
+                  <div className="w-2 h-2 bg-rose-500 rounded-full animate-bounce" style={{animationDelay: '0.4s'}}></div>
                 </div>
               </div>
             )}
             <div ref={chatEndRef} />
           </div>
 
-          <div className="mt-4 flex gap-2 items-center">
+          <div className="mt-5 flex gap-3 items-center pb-2 shrink-0">
             <input
               type="text"
               value={userInput}
               onChange={(e) => setUserInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="输入你的回答..."
-              className="flex-1 bg-white/5 border border-white/10 rounded-full px-5 py-3 text-sm text-white focus:outline-none focus:border-rose-500"
+              placeholder="沉稳回答面试官提问..."
+              className="flex-1 bg-black/5 dark:bg-white/5 border border-black/10 dark:border-white/10 rounded-full px-6 py-4 text-sm text-quality font-black focus:outline-none focus:border-rose-500 transition-all"
             />
             <button
               onClick={handleSendMessage}
               disabled={!userInput.trim() || isTyping}
-              className="w-12 h-12 bg-rose-600 rounded-full flex items-center justify-center text-white shadow-lg active:scale-90 transition-transform disabled:opacity-50"
+              className="w-14 h-14 bg-rose-600 rounded-full flex items-center justify-center text-white shadow-2xl active:scale-90 transition-all disabled:opacity-50"
             >
-              🚀
+              <span className="text-xl">↑</span>
             </button>
             <button
               onClick={handleEndInterview}
-              className="w-10 h-10 glass rounded-full flex items-center justify-center text-xs text-rose-400 hover:text-rose-300"
-              title="手动结束"
+              className="w-12 h-12 glass rounded-full flex items-center justify-center text-lg text-rose-500 border-rose-500/20 shadow-md active:scale-90 transition-all"
+              title="提交面试"
             >
-              ⏹
+              ✓
             </button>
           </div>
         </div>
       )}
 
       {phase === 'evaluating' && (
-        <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+        <div className="flex-1 flex flex-col items-center justify-center space-y-8">
           <div className="relative">
-            <div className="w-24 h-24 border-4 border-rose-500/20 rounded-full"></div>
-            <div className="absolute inset-0 w-24 h-24 border-4 border-rose-500 rounded-full border-t-transparent animate-spin"></div>
+            <div className="w-32 h-32 border-[6px] border-rose-500/10 rounded-full"></div>
+            <div className="absolute inset-0 w-32 h-32 border-[6px] border-rose-500 rounded-full border-t-transparent animate-spin"></div>
           </div>
-          <p className="text-slate-400 font-bold animate-pulse">面试官正在整理评估报告...</p>
+          <div className="text-center space-y-2">
+            <p className="text-quality font-black text-xl animate-pulse">正在生成面试报告</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-widest">Analyzing your performance...</p>
+          </div>
         </div>
       )}
 
       {phase === 'result' && (
-        <div className="flex-1 flex flex-col space-y-6 animate-in zoom-in-95 duration-500 overflow-y-auto scrollbar-hide">
-          <div className="glass p-8 rounded-[3rem] border-rose-500/30 text-center space-y-4">
-            <h3 className="text-xl font-bold text-slate-400">面试评估</h3>
-            <div className="text-7xl font-black text-rose-500 drop-shadow-[0_0_15px_rgba(244,63,94,0.3)]">
-              {evaluation.match(/\d+/)?.[0] || '80'}
+        <div className="flex-1 flex flex-col space-y-6 animate-in zoom-in-95 duration-500 overflow-y-auto scrollbar-hide pb-10">
+          <div className="glass p-10 rounded-[4rem] border-rose-500/20 text-center space-y-5 shadow-2xl shrink-0">
+            <h3 className="text-sm font-black text-slate-500 uppercase tracking-[0.3em]">面试综合得分</h3>
+            <div className="text-9xl font-black text-rose-600 drop-shadow-[0_0_20px_rgba(244,63,94,0.3)]">
+              {evaluation.match(/\d+/)?.[0] || '85'}
             </div>
-            <p className="text-xs text-slate-500 font-mono tracking-widest uppercase">Performance Score</p>
+            <p className="text-[10px] text-slate-500 font-black tracking-widest uppercase italic">Practice makes perfect</p>
           </div>
 
-          <div className="glass p-6 rounded-3xl border-white/5 prose prose-invert prose-sm max-w-none text-slate-300 text-xs leading-relaxed">
+          <div className="glass p-8 rounded-[2.5rem] border-black/5 dark:border-white/5 prose dark:prose-invert max-w-none text-quality text-sm leading-relaxed font-black shadow-md">
              {evaluation.split('\n').map((line, i) => (
-               <p key={i} className="mb-2">{line}</p>
+               <p key={i} className="mb-3">{line}</p>
              ))}
           </div>
 
-          <button
-            onClick={() => {
-               setPhase('setup');
-               setMessages([]);
-               setTimeLeft(300);
-            }}
-            className="w-full py-4 glass rounded-[2rem] text-slate-300 font-bold hover:bg-white/5"
-          >
-            再次挑战
-          </button>
-          <div className="h-4"></div>
+          <div className="flex gap-4">
+            <button
+              onClick={() => {
+                 setPhase('setup');
+                 setMessages([]);
+                 setTimeLeft(300);
+              }}
+              className="flex-1 py-6 glass rounded-[2.5rem] text-quality font-black text-lg hover:bg-black/5 shadow-lg active:scale-95 transition-all"
+            >
+              重新演练
+            </button>
+            <button
+              onClick={onBack}
+              className="flex-1 py-6 bg-rose-600 text-white rounded-[2.5rem] font-black text-lg shadow-xl active:scale-95 transition-all"
+            >
+              完成退出
+            </button>
+          </div>
         </div>
       )}
     </div>

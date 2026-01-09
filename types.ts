@@ -1,5 +1,5 @@
 
-export type Section = 'home' | 'cognitive' | 'breathing' | 'stats' | 'trivia' | 'interview';
+export type Section = 'home' | 'cognitive' | 'breathing' | 'stats' | 'trivia' | 'interview' | 'decision';
 
 export interface ScoreRecord {
   id: string;

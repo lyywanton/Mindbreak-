@@ -9,13 +9,19 @@ const VisualTest: React.FC<{ onFinish: (s: number) => void; onBack: () => void }
   const [timeLeft, setTimeLeft] = useState(30);
   const [isPlaying, setIsPlaying] = useState(false);
 
+  // High-difficulty visually similar pairs (Evil Pairs)
   const emojiSets = [
-    ['🍎', '🍏'], ['🐱', '🐶'], ['🌕', '🌑'], ['❤️', '💔'], ['😀', '😎'], ['🔥', '❄️']
+    ['🍈', '🍐'], ['🍊', '🍋'], ['🏐', '⚽'], ['🫓', '🍪'], ['🫒', '🍇'], 
+    ['🧊', '💎'], ['📜', '📃'], ['🧶', '🧵'], ['🔭', '🔬'], ['🥛', '🍶'],
+    ['🌳', '🌲'], ['🧁', '🍨'], ['🍤', '🍗'], ['🧂', '🕯️'], ['🥧', '🥯'],
+    ['🥟', '🥯'], ['🧄', '🧅'], ['🥔', '🥝'], ['🍄', '🍞'], ['🥨', '🥐']
   ];
 
   const setupLevel = () => {
     const set = emojiSets[Math.floor(Math.random() * emojiSets.length)];
-    const size = level < 3 ? 9 : level < 6 ? 16 : 25;
+    // Faster grid expansion: 4x4 -> 5x5 -> 6x6 -> 7x7 -> 8x8
+    const cols = level < 3 ? 4 : level < 6 ? 5 : level < 10 ? 6 : level < 15 ? 7 : 8;
+    const size = cols * cols;
     const g = Array(size).fill(set[0]);
     const targetIdx = Math.floor(Math.random() * size);
     g[targetIdx] = set[1];
@@ -34,11 +40,11 @@ const VisualTest: React.FC<{ onFinish: (s: number) => void; onBack: () => void }
 
   const handleSelect = (emoji: string) => {
     if (emoji === target) {
-      setScore(s => s + 20);
+      setScore(s => s + (10 + level * 5));
       setLevel(l => l + 1);
       setupLevel();
     } else {
-      setScore(s => Math.max(0, s - 10));
+      setScore(s => Math.max(0, s - 15));
     }
   };
 
@@ -50,31 +56,41 @@ const VisualTest: React.FC<{ onFinish: (s: number) => void; onBack: () => void }
     setupLevel();
   };
 
+  const cols = level < 3 ? 4 : level < 6 ? 5 : level < 10 ? 6 : level < 15 ? 7 : 8;
+
   return (
-    <div className="h-full flex flex-col items-center justify-center p-6">
+    <div className="h-full flex flex-col items-center justify-center p-4">
       <div className="flex w-full justify-start absolute top-8 px-6">
-        <button onClick={onBack} className="text-slate-400">退出</button>
+        <button onClick={onBack} className="text-slate-500 font-bold">← 退出</button>
       </div>
 
       {!isPlaying && timeLeft === 30 ? (
-        <div className="text-center space-y-6">
-          <div className="w-24 h-24 rounded-2xl glass flex items-center justify-center text-4xl mx-auto">🔍</div>
-          <h2 className="text-2xl font-bold">视觉搜索</h2>
-          <p className="text-slate-400">找出网格中唯一的那个“异类”。</p>
-          <button onClick={start} className="px-10 py-3 bg-indigo-500 rounded-full font-bold">开始</button>
+        <div className="text-center space-y-8 w-full max-w-xs">
+          <div className="w-24 h-24 rounded-3xl glass flex items-center justify-center text-5xl mx-auto shadow-2xl">🔍</div>
+          <h2 className="text-2xl font-black text-slate-900 dark:text-white">视觉搜索 (Hard)</h2>
+          <p className="text-slate-500 font-bold text-sm leading-relaxed px-2">
+            眼部极限挑战：在密集的网格中找出唯一的“异类”。难度随关卡指数递增。
+          </p>
+          <button onClick={start} className="px-12 py-5 bg-indigo-600 rounded-full font-black text-white shadow-xl active:scale-95 w-full">开始挑战</button>
         </div>
       ) : isPlaying ? (
-        <div className="w-full space-y-8">
-          <div className="flex justify-between items-center glass p-3 rounded-2xl">
-            <span className="text-xs text-slate-500">LEVEL {level}</span>
-            <span className="text-indigo-400 font-bold">{timeLeft}s / {score}pts</span>
+        <div className="w-full space-y-8 max-w-sm">
+          <div className="flex justify-between items-center glass p-4 rounded-3xl border-indigo-500/10">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Level {level}</span>
+            <div className="flex items-center gap-4">
+               <span className="text-rose-500 font-black text-lg">{timeLeft}s</span>
+               <span className="text-indigo-500 font-black text-lg">{score}</span>
+            </div>
           </div>
-          <div className={`grid ${level < 3 ? 'grid-cols-3' : level < 6 ? 'grid-cols-4' : 'grid-cols-5'} gap-2`}>
+          <div 
+            className="grid gap-1.5 p-2 glass rounded-[2.5rem] border-indigo-500/10 shadow-inner"
+            style={{ gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` }}
+          >
             {grid.map((e, i) => (
               <button
                 key={i}
                 onClick={() => handleSelect(e)}
-                className="h-16 glass rounded-xl text-3xl flex items-center justify-center active:bg-white/10"
+                className="aspect-square glass rounded-2xl text-2xl flex items-center justify-center active:scale-90 transition-all hover:bg-indigo-500/5"
               >
                 {e}
               </button>
@@ -82,12 +98,13 @@ const VisualTest: React.FC<{ onFinish: (s: number) => void; onBack: () => void }
           </div>
         </div>
       ) : (
-        <div className="text-center space-y-6">
-          <h2 className="text-4xl font-black text-indigo-400">{score}</h2>
-          <p className="text-slate-400">训练有素的眼力！</p>
-          <div className="flex gap-4">
-            <button onClick={start} className="px-8 py-3 glass rounded-full">重试</button>
-            <button onClick={() => onFinish(score)} className="px-8 py-3 bg-indigo-500 rounded-full font-bold">完成</button>
+        <div className="text-center space-y-8 animate-in zoom-in duration-500 w-full max-w-xs">
+          <h2 className="text-xl font-black text-slate-500 uppercase tracking-widest">挑战总结</h2>
+          <div className="text-8xl font-black text-indigo-500 drop-shadow-sm">{score}</div>
+          <p className="text-slate-500 font-black text-sm">成功突破至 Level {level}</p>
+          <div className="flex flex-col gap-3">
+            <button onClick={start} className="w-full py-4 glass rounded-3xl font-black text-slate-700 dark:text-slate-300 active:scale-95">重试一次</button>
+            <button onClick={() => onFinish(score)} className="w-full py-5 bg-indigo-600 rounded-3xl font-black text-white shadow-lg active:scale-95">完成练习</button>
           </div>
         </div>
       )}
